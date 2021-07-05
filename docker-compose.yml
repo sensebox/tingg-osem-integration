@@ -1,0 +1,30 @@
+version: "2"
+services:
+  ttn-osem-integration:
+    build: .
+    ports:
+      - 3000:3000
+    environment:
+      - NODE_CONFIG: |-
+        {
+          "port": 3000,
+          "loglevel":"trace",
+          "openSenseMap-API-models": {
+            "db": {
+              "mongo_uri":"mongodb://db/ttn-integration"
+            }
+          }
+        }
+    depends_on:
+      - db
+    # to get raw json logs for filtering, use this:
+    # command: npm run start:rawlogs
+
+  db:
+    image: sensebox/opensensemap-api-mongo
+    ports:
+      - 27017:27017
+    environment:
+      - OSEM_dbconnectionstring=mongodb://db/ttn-integration
+    #command: --auth
+

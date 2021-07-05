@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: routes/v1.1.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: routes/v1.1.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>'use strict';
+
+/**
+ * Router for TTN HTTP integrations API v1 and this API v1
+ * @module routes/v1_1
+ * @license MIT
+ */
+
+const router = require('express').Router(),
+  color = require('console-control-strings').color,
+  { Box } = require('openSenseMapAPI').models,
+  decodeJSON = require('openSenseMapAPI').decoding.json.decodeMessage,
+  decoder = require('../decoding'),
+  cfg = require('../../config');
+
+/**
+ * send responses &amp; do logging
+ * @private
+ * @param {Request} req
+ * @param {Response} res
+ * @param {Object} data - Format: either String or { code: Number, msg: Any }
+ */
+const handleResponse = function handleResponse (req, res, data) {
+  // handle undhandled errors
+  if (!data.code) {
+    data = { code: 501, msg: data };
+  }
+
+  if (data.code >= cfg.loglevelHTTPcodes[cfg.loglevel]) {
+    let codeString = `${color('red')}${data.code}${color('reset')}`;
+    if (data.code &lt; cfg.loglevelHTTPcodes['warn']) {
+      codeString = `${color('green')}${data.code}${color('reset')}`;
+    } else if (data.code &lt; cfg.loglevelHTTPcodes['error']) {
+      codeString = `${color('yellow')}${data.code}${color('reset')}`;
+    }
+
+    const responseTime = new Date().getTime() - req.time.getTime(),
+      boxInfo = {
+        dev_id: req.body.dev_id,
+        port: req.body.port,
+        box: req.box ? req.box._id.toString() : 'unkown',
+        profile: req.body.payload_fields ? 'JSON' : req.box ? req.box.integrations.ttn.profile : 'unkown'
+      };
+
+    console.log(`  ${codeString} (${responseTime}ms)\t${JSON.stringify(boxInfo)}\n  ${data.msg}\n`);
+  }
+
+  return res.status(data.code).json(data);
+};
+
+/**
+ * Accepts a POST request from the TTN HTTP integrations uplink API, version 1
+ * as specified {@link https://www.thethingsnetwork.org/docs/applications/http/|here},
+ * and decodes it's payload to store a set of measurements for a box.
+ * The box is identified by it's registered values app_id and dev_id.
+ * If a box specifies a port, it will only recieve measurements sent on that port.
+ * @name 'POST /v1.1'
+ * @example
+ * curl -X POST -H "content-type: application/json" -d \
+ *   '{ "app_id": "asdf", "dev_id": "qwerty", "payload_raw": "kzIrIYzlOycAMgEA" }' \
+ *   localhost:3000/v1.1
+ */
+router.post('/', (req, res) => {
+  const { app_id, dev_id, payload_raw, payload_fields, port } = req.body;
+  let time;
+
+  // extract time from payload: use time from gateway if available, else use servertime
+  if (req.body.metadata) {
+    time = req.body.metadata.time;
+    if (req.body.metadata.gateways &amp;&amp; req.body.metadata.gateways[0].time) {
+      time = req.body.metadata.gateways[0].time;
+    }
+  }
+
+  if (!dev_id || !app_id || !(payload_raw || payload_fields)) {
+    return handleResponse(req, res, {
+      code: 422,
+      msg: 'malformed request: any of [dev_id, app_id, payload_fields, payload_raw] is missing'
+    });
+  }
+
+  // look up box for dev_id &amp; app_id in DB
+  Box.find({
+    'integrations.ttn.app_id': app_id,
+    'integrations.ttn.dev_id': dev_id
+  }).catch(msg => Promise.reject({ code: 501, msg }))
+  .then(boxes => {
+    if (!boxes.length) {
+      return Promise.reject({ code: 404, msg: `no box found for dev_id '${dev_id}' and app_id '${app_id}'` });
+    }
+
+    // filter the boxes by their configured port. also include boxes with undefined port.
+    req.box = boxes.filter(box => {
+      const p = box.integrations.ttn.port;
+
+      return (p === port || p === undefined);
+    })[0];
+
+    if (!req.box) {
+      return Promise.reject({ code: 404, msg: `no box found for port ${port}` });
+    }
+
+    let promise;
+    if (payload_fields &amp;&amp; Object.keys(payload_fields).length) {
+      promise = decodeJSON(payload_fields);
+    } else {
+      promise = decoder.decodeBase64(payload_raw, req.box, time);
+    }
+
+    return promise.catch(msg => Promise.reject({ code: 422, msg }));
+  })
+
+  // store measurements in DB
+  .then(measurements => {
+    return req.box.saveMeasurementsArray(measurements)
+      .catch(msg => Promise.reject({ code: 501, msg }));
+  })
+
+  .then(() => handleResponse(req, res, { code: 201, msg: 'measurements created' }))
+
+  // handle any error passed in
+  .catch(err => handleResponse(req, res, err));
+});
+
+module.exports = router;
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-decoding.html">decoding</a></li><li><a href="module-decoding_debug.html">decoding/debug</a></li><li><a href="module-decoding_helpers.html">decoding/helpers</a></li><li><a href="module-decoding_lora-serialization.html">decoding/lora-serialization</a></li><li><a href="module-decoding_sensebox_home.html">decoding/sensebox_home</a></li><li><a href="module-routes_v1_1.html">routes/v1_1</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.4.3</a> on Wed May 03 2017 19:20:09 GMT+0200 (CEST)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

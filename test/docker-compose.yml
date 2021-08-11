@@ -18,7 +18,7 @@ services:
             "db": {
               "mongo_uri":"mongodb://db/ttn-osem-tests"
             }
-          }
+                    }
         }
     depends_on:
       - db

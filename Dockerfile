@@ -1,4 +1,4 @@
-FROM node:12-alpine
+FROM node:14.18-alpine as build
 
 ENV NODE_ENV=production
 
@@ -11,7 +11,7 @@ COPY yarn.lock /usr/src/app/
 
 # npm rebuild is required because the prebuilt binaries are not compatible with musl
 # remove when https://github.com/kelektiv/node.bcrypt.js/issues/528 is resolved
-RUN apk --no-cache --virtual --ignore-engines .build add build-base python3 git \
+RUN apk --no-cache --virtual .build add build-base python3 git \
  && yarn install --pure-lockfile --production \
  && npm rebuild bcrypt --build-from-source \
  && apk del .build
